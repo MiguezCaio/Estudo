@@ -1,0 +1,237 @@
+---
+title: "Trabalho R"
+author: "Caio Pacheco Miguez"
+date: "10/06/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r libraries, message=FALSE,warning=FALSE}
+library(tidyverse)
+library(ggplot2)
+library(AER)
+library(ggthemes)
+require(maps)
+require(viridis)
+library(plotly)
+```
+
+## Uma Análise estatística da Obesidade no Globo
+
+  Um problema inerente ao século XXI é a obesidade. Derivada de um estilo de vida cada vez mais sedentário,a obesidade contribui significativamente para o aumento no fator de risco de diversas doenças. Neste trabalho, farei uma análise deste problema no mundo, sua evolução nos últimos anos e tentar estimar algumas das causas.
+
+Primeiramente temos de baixar as bases de dados que serão utilizadas. Assim:
+```{r bases, message=FALSE,warning=FALSE}
+#com todos os dados de obesidade que precisaremos
+Obesidade<-read_csv("https://raw.githubusercontent.com/MiguezCaio/R-estudo/MiguezCaio-patch-1/obesity-cleaned.csv")
+#pib per capita de diversos países
+GDPpercapita<-read_csv("https://raw.githubusercontent.com/MiguezCaio/R-estudo/MiguezCaio-patch-1/gdp.csv")
+#Gasto de cada governo com saúde
+Hexp<-read_csv("https://raw.githubusercontent.com/MiguezCaio/R-estudo/MiguezCaio-patch-1/healthexpend.csv")
+#Base de dados para que possamos utilizar o mapa-múndi
+world_map <- map_data("world")
+```
+
+
+Por exemplo, esta é a base "Obesidade":
+```{r head}
+head(Obesidade)
+```
+
+Criaremos duas funções para facilitar a organização dos dados:
+```{r funções,message=FALSE,warning=FALSE}
+# A primeira para limpar a base de Obesidade
+limparob<-function(data){
+data<-data %>% 
+  separate("Obesity (%)", c("porcentagem","Estimação menor"),sep=" \\[") %>%
+  separate("Estimação menor",c("Estimação Menor","Estimação Maior"),sep="\\-")
+data$`Estimação Maior`<-gsub(pattern= "\\]",x=data$`Estimação Maior`,replacement = " ")
+data$Country<-gsub(" of America","",data$Country)
+data$Country<-gsub(" of Great Britain and Northern Ireland","",data$Country)
+data$Country<-gsub("United Republic of ","",data$Country)
+data$Country<-gsub("\\(Bolivarian Republic of)","",data$Country)
+data$porcentagem<-as.numeric(data$porcentagem)
+return(data)
+}
+#A segunda para limpar as outras bases
+tidybases<-function(x){
+names(x)[1]<-"Country"
+x<-x%>%
+  gather(key=Year,value = valor,-Country)%>%
+  arrange(Country)
+x$Year<-as.numeric(gsub("X","",x$Year))
+return(x)
+}
+
+#Colocando em prática:
+Obesidade<-limparob(Obesidade)
+GDPpercapita<-tidybases(GDPpercapita)
+Hexp<-tidybases(Hexp)
+#Renomeando as varíaveis para facilitar a incorporação no banco de dados central
+GDPpercapita<-rename(GDPpercapita,GDPpercapita=valor)
+Hexp<-rename(Hexp,Expenditure=valor)
+```
+
+## Mapa
+Para nos situar, criemos um mapa-múndi com todos os dados. No exemplo, utilizei o ano de 2010
+
+```{r map,warning=FALSE}
+#Criamos uma base que use somente os dados de 2010 e crie uma nova váriavel qualitativa que irá me facilitar na análise.
+
+mapa<-Obesidade %>%
+  filter(Sex=="Both sexes",Year==2010)  %>%
+  rename(region=Country)%>%
+  mutate(region = ifelse(region == "United States", "USA", region)) %>%
+  mutate(region = ifelse(region == "United Kingdom", "UK", region)) %>%
+  mutate(region = ifelse(region == "Russian Federation", "Russia", region)) %>%
+  mutate(region = ifelse(region == "Viet Nam", "Vietnam", region)) %>%
+  mutate(porcentagem=as.numeric(porcentagem))%>%
+  mutate(Classe=ifelse(porcentagem >=50,"1-Extremamente Alta",
+                       ifelse(porcentagem >=40,"2-Muito Alta",
+                              ifelse(porcentagem >=30,"3-Alta",
+                                     ifelse(porcentagem >=20,"4-Média",
+                                            ifelse(porcentagem >=10,"5-Baixa",
+                                                   ifelse(porcentagem >=0,"6-Muito Baixa","Sem Dados")))))))
+g<-right_join(mapa,world_map)  
+grafico2<-ggplot(g, aes(x = long, y = lat, group = group)) +
+  geom_polygon(mapping=aes(fill=Classe,text=paste(
+    " País: ",region, "\n",
+    "Classe: ", Classe, "\n",
+    "% de obesos: ", porcentagem, "\n")), colour = "grey") +
+  labs(x="Longitude",
+       y="Latitude",
+       title ="A Obesidade no mundo em 2010")
+ggplotly(grafico2,tooltip = "text")
+```
+
+## Países desenvolvidos
+Podemos ver que os EUA se destaca em comparação ao resto do mundo. Porém imaginei que pudesse soar injusto comparar com países com renda per capita, desenvolvimento e cultura totalmente diferentes. Assim, resolvi comparar com outros países considerados desenvolvidos, além de separar por sexo para um gráfico mais informativo.
+
+```{r barras}
+#Filtrei  a base de dados para incluir somente os países escolhidos
+d<-Obesidade %>%
+  filter(Sex!="Both sexes",Country=="United States"|Country=="France"| Country=="United Kingdom" | Country=="Germany" |Country=="Sweden",Year=="2010")
+grafico<-ggplot(d, aes(x=Country,y=as.numeric(porcentagem)/2,fill=Sex)) + 
+  geom_bar(stat = "identity") +
+  scale_x_discrete("Country")+
+  scale_y_continuous("porcentagem", breaks = seq(0,100, by = 5))+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5)) +
+  labs(title = "Obesidade por país e sexo")
+grafico+theme_fivethirtyeight()
+```
+
+
+## Trajetória
+Ao comparar com outros países de nível de desenvolvimento similares, pudemos ver como os EUA se destaca, porém será que foi sempre assim? Uma forma de descubrirmos é comparar a obesidade em uma perspectiva histórica. Primeiramente farei uma comparação com o nosso país, na qual incluí uma representação gráfica da diferença entre os dois.
+```{r Brasil x EUA}
+#Primeira base com os dois países
+basegrafico1<-Obesidade %>%
+  filter(Country=="United States" | Country=="Brazil",Sex=="Both sexes")
+#Separando para obter a diferença
+BR<-Obesidade %>%
+  filter(Country=="Brazil",Sex=="Both sexes") %>%
+  select(porcentagem,Year)
+US<-Obesidade %>%
+  filter(Country=="United States",Sex=="Both sexes") %>%
+  select(porcentagem,Year)
+#criando a base diferença
+Dif<-US-BR 
+Dif$Year=1975:2016
+Dif$Country<-"US-BRr"
+#adicionando-a na base principal
+basegrafico1<-full_join(basegrafico1,Dif)
+grafico1<- basegrafico1 %>%
+  ggplot(mapping=aes(x=Year,y=as.numeric(porcentagem,show.legend=TRUE),color=Country ))+
+  geom_smooth() +
+  labs(x="Ano",
+       y="% de Obesos em cada país",
+       title="Trajetória da Obesidade no Brasil x EUA")+
+  theme(axis.title.y = element_text(angle=270))
+grafico1+theme_grey()
+```
+
+Ainda pensando por uma perspectiva histórica, podemos fazer o mesmo exércicio que realizamos com o gráfico de barras: comparar os EUA com os mesmos países desenvolvidos para ver se esta diferença se agravou com o tempo. Dessa forma:
+```{r EUA x desenvolvidos}
+basegrafico1<-Obesidade %>%
+  filter(Sex=="Both sexes",Country=="United States"|Country=="France"| Country=="United Kingdom" | Country=="Germany" |Country=="Sweden")
+grafico1<- basegrafico1 %>%
+  ggplot(mapping=aes(x=Year,y=as.numeric(porcentagem,show.legend=TRUE)/100,color=Country ))+
+  geom_smooth() +
+  labs(x="Ano",
+       y="% de Obesos em cada país",
+       title="Trajetória da Obesidade")+
+  theme(axis.title.y = element_text(angle=270))
+grafico1+theme_fivethirtyeight()
+```
+
+
+Ainda que os EUA sempre possuíram taxas de obesidade maiores do que estes outros países, esta diferença se agravou com o passar dos anos, principalmente com Suécia, Alemanha e França.
+
+## Consequências?
+
+Agora que estabelecemos a presença deste fenômeno nos últimos anos, nos cabe pensar o que esta crescente afeta em outras facetas da sociedade. Um dos candidatos à esse teste é o valor gasto anualmente pelo governo em saúde. Podemos pensar que com o aumento de uma população (obesa) mais suscetível à doenças faria com que o governo acabe destinando parte maior de seu orçamento com as atividades médicas que esta população demanda. 
+
+
+Assim, para testar esse pensamento criaremos uma base de dados que represente a fatia do PIB de cada país destinada à saúde:
+```{r Gráfico regressão}
+#Incluindo pib per capita e gasto do governo com saúde
+OG<-right_join(Obesidade,GDPpercapita)
+OGE<-right_join(OG,Hexp)
+#retirando quaisquer dados incompletos
+OGE_clean<-OGE[complete.cases(OGE),]
+#criando a variável da porcentagem do gasto sobre o pib
+OGE_ready<-OGE_clean %>%
+  mutate("%exp"=(Expenditure)/(GDPpercapita))
+E<-filter(OGE_ready,Country=="United States",Sex=="Both sexes")
+grafico<-E %>%
+  ggplot(mapping = aes(x=as.numeric(Year),y=`%exp`)) +
+  geom_smooth(color="red")+
+  labs(x="Ano",
+       y="Gasto do governo com saúde como % do PIB",
+       title="Evolução do gasto do governo com saúde nos EUA")
+grafico+theme_fivethirtyeight()
+```
+
+
+Podemos ver que pela crescente no gasto do governo, começam a aparecer similaridades com a crescente nas taxas de obesidade. A única forma de realmente testar se o aumento da obesidade é um bom candidato para explicar este crescimento nos gastos do governo é realizando uma regressão entre os dois. Assim:
+
+
+
+$$\%gasto = \beta_{0} + \beta_{1}*\%obesidade + u$$
+                      
+```{r Regressão,warning=FALSE}
+attach(E)
+resultados<-lm(`%exp`~ porcentagem)
+summary(resultados)
+```
+
+Ainda que seja cedo para diferenciar uma causalidade de uma simples correlação, a regressão retornou um $R^{2}$ de 0,855, um valor bem alto. Isto implica uma correlação alta entre os dois fenômenos
+
+## Conclusão
+
+Dessa forma, concluímos a análise estatística da Obesidade. Nela, atestamos o aumento deste fenômeno nos últimos anos, principalmente em países desenvolvidos. Além disso, nota-se a disparidade dos EUA para o resto do mundo nesse quesito e utilizando justamente essa disparidade, pudemos notar uma correlação altíssima entre gastos do governo com saúde e a taxa de obesidade. 
+
+
+## Referências
+
+### Bases
+[Obesidade](https://www.kaggle.com/amanarora/obesity-among-adults-by-country-19752016)
+
+
+[PIB per capita e gasto com saúde](https://www.kaggle.com/angelmm/healthteethsugar)
+
+### Outros
+[Letras Gregas](https://www.calvin.edu/~rpruim/courses/s341/S17/from-class/MathinRmd.html)
+
+[Eixos ggplot](https://www.datanovia.com/en/blog/ggplot-axis-labels/)
+
+[Mapa-múndi](https://www.datanovia.com/en/blog/how-to-create-a-map-using-ggplot2/)
+
+[RMarkdown](https://rstudio.com/wp-content/uploads/2015/03/rmarkdown-reference.pdf?_ga=2.262424398.390989190.1592407547-213756197.1589394274)
+
+[GitHub do Trabalho](https://github.com/MiguezCaio/R-estudo/tree/MiguezCaio-patch-1)
+
+
